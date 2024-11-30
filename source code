@@ -1,0 +1,974 @@
+# importing necessary libs to be used below..
+import sys
+import re
+import heapq 
+import time 
+from collections import deque
+
+# GLobal Register initialized empty for managing propositions below in Deduction and CNF 
+Register_p = {}
+
+# Abstract Syntax Tree (AST) Nodes Definitions for PL.
+class Prop_Exp:
+    def __init__(self, exprsn):
+        self.exprsn = exprsn
+
+    def __repr__(self):
+        return self.exprsn
+
+    def __eq__(self, other):
+        if not isinstance(other, Prop_Exp):
+            return False
+        return self.exprsn == other.exprsn
+
+    def __hash__(self):
+        return hash(self.exprsn)
+
+# Function to fetch Propositions from Register_p
+def fetch_Prop(exprsn):
+    temp_exp = Register_p.get(exprsn)
+    if temp_exp is None:
+        temp_exp = Prop_Exp(exprsn)
+        Register_p[exprsn] = temp_exp
+    return temp_exp
+
+# Binary Operation Class for PL AST Nodes 
+class binaryOperation: 
+    def __init__(self, operator, left, right):
+        self.operator = operator
+        self.left = left
+        self.right = right
+
+    def __repr__(self):
+        return f"({self.left} {self.operator} {self.right})"
+
+    def __eq__(self, other):
+        return self.equals(other)
+
+    def equals(self, other):
+        if not isinstance(other, binaryOperation):
+            return False
+        if self.operator != other.operator:
+            return False
+        if self.left != other.left:
+            return False
+        if self.right != other.right:
+            return False
+        return True
+
+    def __hash__(self):
+        return hash((self.operator, self.left, self.right))
+
+# Unary Operation Class for PL AST Nodes    
+class unaryOperation:
+    def __init__(self, operator, operand):
+        self.operator = operator
+        self.operand = operand
+
+    def __repr__(self):
+        return f"({self.operator}{self.operand})"
+    
+    def __eq__(self, other_exp):
+        return self.equals(other_exp)
+
+    def equals(self, other_exp):
+        if not isinstance(other_exp, unaryOperation):
+            return False
+        if self.operator != other_exp.operator:
+            return False
+        if self.operand != other_exp.operand:
+            return False
+        return True
+
+    def __hash__(self):
+        return hash((self.operator, self.operand))
+
+# Parser for PL 
+def parseFormula(f):
+    tokenPattern = r'[A-Z]+|[!&|>=()]'
+    matches = re.findall(tokenPattern, f)
+    tokens = [token for token in matches]
+    return parseExpression(tokens)
+
+# Token Handling for PL AST 
+def handle_token(token, operator_hierarchy, op_stack, stack):
+    match token:
+        case _ if re.match(r'[A-Z]+', token):  
+            prop = fetch_Prop(token)
+            stack.append(prop)
+
+        case '(':  
+            op_stack.append(token)
+
+        case ')':  
+            while op_stack and op_stack[-1] != '(':
+                operator_handler(op_stack, stack)
+            if op_stack and op_stack[-1] == '(':
+                op_stack.pop()  
+
+        case _ if token in operator_hierarchy: 
+            while (op_stack and op_stack[-1] != '(' and
+                    operator_hierarchy.get(op_stack[-1], 0) >= operator_hierarchy[token]):
+                operator_handler(op_stack, stack)
+            op_stack.append(token)
+
+def operator_handler(op_stack, stack):
+    op = op_stack.pop()
+    if op == '!':
+        t = stack.pop()
+        stack.append(unaryOperation('!', t))
+    else:
+        t2 = stack.pop()
+        t1 = stack.pop()
+        stack.append(binaryOperation(op, t1, t2))
+
+def parseExpression(tokens):
+    stack = []  # Stack for AST
+    op_stack = []  # Operator Stack for PL
+
+    operator_hierarchy = {'!': 4, '&': 3, '|': 2, '>': 1, '=': 1}
+
+    for t in tokens:
+        handle_token(t, operator_hierarchy, op_stack, stack)
+
+    # Apply remaining operators in the stack
+    while op_stack:
+        operator_handler(op_stack, stack)
+
+    # Finally, return the root of the stack
+    return stack[0]
+
+# Theorem Prover using Natural Deduction
+class natural_Deduction_Theorem_Prover:
+    def __init__(self, kb, query):
+        self.originalKB = kb  
+        self.query = query  
+        self.steps = []  
+        self.stepCounter = 0  
+        self.stepCounter = 1 
+        self.proved_Flag = False  
+        self.nodesExplored = 0
+
+    def prove(self):
+
+        # Start with biconditional elimination
+        kb = self.biconditional_elimination(self.originalKB)
+
+        # Print initial KB
+        self.print_initial_kb()
+    
+        initial_state = ProofState(kb=kb, inferred=set(), steps=[], hypothesisAssum=[])
+        queue = deque()
+
+        # Adding initial state to the queue
+        for state in [initial_state]:
+            queue.append(state)
+            
+        visited_states = set()
+
+        while queue:
+            curr_State = queue.popleft()
+            self.nodesExplored += 1
+            # Check if query is already inferred
+            if self.formula_in_set(self.query, curr_State.inferred):
+                self.proved_Flag = True
+                self.steps = curr_State.steps
+                break
+
+            # Avoid revisiting the same state
+            if curr_State in visited_states:
+                continue
+            visited_states.add(curr_State)
+
+            # Apply inference rules
+            newStates = self.apply_Logical_inferequilences(curr_State)
+            queue.extend(newStates)
+
+        # Print the steps
+        self.print_steps()
+
+    def print_initial_kb(self):
+        for temp_formula in self.originalKB:
+            print(f"S{self.stepCounter}: {temp_formula}")
+            self.stepCounter += 1
+
+    def print_steps(self):
+        if self.proved_Flag:
+            for s_i in self.steps:
+                print(f"S{self.stepCounter}: {s_i}")
+                self.stepCounter += 1
+            print(f"Total steps taken: {self.stepCounter - 1}")
+        else:
+            print(f"Query {self.query} could not be derived.")
+            print(f"Total steps taken: {self.stepCounter - 1}")
+
+
+    def eliminate_iff(self,f):
+        firstImply = binaryOperation('>', f.left, f.right)
+        secondImply = binaryOperation('>', f.right, f.left)
+        return firstImply, secondImply
+
+    def biconditional_elimination(self, kb):
+        updated_KB = []
+
+        for f1 in kb:
+            if not (isinstance(f1, binaryOperation) and f1.operator == '='):
+                updated_KB.append(f1)
+                continue
+            
+        for f2 in kb:
+            if isinstance(f2, binaryOperation) and f2.operator == '=':
+                firstImply, secondImply = self.eliminate_iff(f2)
+                updated_KB.append(firstImply)
+                updated_KB.append(secondImply)
+                self.steps.append(f"Inferred {firstImply} and {secondImply} via Biconditional Elimination from {f2}.")
+       
+        return updated_KB
+
+    def formula_in_set(self, formula, formula_set):
+        for f in formula_set:
+            if f == formula:
+                return True
+        return False
+    
+    def formula_in_set_new(self, formula, formula_set):
+        return any(f == formula for f in formula_set)
+    
+    def extract_propositions(self, formula):
+        
+        if isinstance(formula, Prop_Exp):
+            return [formula]
+        elif isinstance(formula, unaryOperation):
+            return self.extract_propositions(formula.operand)
+        elif isinstance(formula, binaryOperation):
+            return self.extract_propositions(formula.left) + self.extract_propositions(formula.right)
+        else:
+            return []
+
+
+    def handle_and_introduction(self, LHS_suff, all_Formulas, inferred, steps, hypothesisAssum, newStates, kb):
+
+        if isinstance(LHS_suff, binaryOperation) and LHS_suff.operator == '&':
+            left = LHS_suff.left
+            right = LHS_suff.right
+
+            if self.formula_in_set(left, all_Formulas) and self.formula_in_set(right, all_Formulas):
+                if not self.formula_in_set(LHS_suff, all_Formulas):
+
+                    freshlyInferr = inferred.copy()
+                    freshlyInferr.add(LHS_suff)
+                    newSteps = steps + [f"Inferred {LHS_suff} via And-Introduction from {left} and {right}."]
+                    newState = ProofState(kb=kb, inferred=freshlyInferr, steps=newSteps, hypothesisAssum=hypothesisAssum)
+                    newStates.append(newState)
+                    return True
+        return False
+    
+    
+    def handle_or_introduction(self, LHS_suff, all_Formulas, inferred, steps, hypothesisAssum, newStates, kb):
+        
+        if isinstance(LHS_suff, binaryOperation) and LHS_suff.operator == '|':
+            left = LHS_suff.left
+            right = LHS_suff.right
+            if self.formula_in_set(left, all_Formulas) or self.formula_in_set(right, all_Formulas):
+                if not self.formula_in_set(LHS_suff, all_Formulas):
+                    knownDisjoint = left if self.formula_in_set(left, all_Formulas) else right
+                    freshlyInferr = inferred.copy()
+                    freshlyInferr.add(LHS_suff)
+                    newSteps = steps + [f"Inferred {LHS_suff} via Or-Introduction from {knownDisjoint}."]
+                    newState = ProofState(kb=kb, inferred=freshlyInferr, steps=newSteps, hypothesisAssum=hypothesisAssum)
+                    newStates.append(newState)
+                    return True
+        return False
+
+    def handle_modus_ponens(self, LHS_suff, RHS_ness, all_Formulas, inferred, steps, hypothesisAssum, newStates, kb, imp):
+
+        if self.formula_in_set(LHS_suff, all_Formulas):
+            if not self.formula_in_set(RHS_ness, all_Formulas):
+
+                freshlyInferr = inferred.copy()
+                freshlyInferr.add(RHS_ness)
+                newSteps = steps + [f"Inferred {RHS_ness} via Modus Ponens from {imp} and {LHS_suff}."]
+                newState = ProofState(kb=kb, inferred=freshlyInferr, steps=newSteps, hypothesisAssum=hypothesisAssum)
+                newStates.append(newState)
+                if RHS_ness == self.query:
+                    self.proved_Flag = True
+                    self.steps = newSteps
+                    return True
+        return False
+    
+    def handle_and_elimination(self, conj, all_Formulas, inferred, steps, hypothesisAssum, newStates, kb):
+        left = conj.left
+        right = conj.right
+        for operand in [left, right]:
+            if not self.formula_in_set(operand, all_Formulas):
+                freshlyInferr = inferred.copy()
+                freshlyInferr.add(operand)
+                newSteps = steps + [f"Inferred {operand} via And-Elimination from {conj}."]
+                newState = ProofState(kb=kb, inferred=freshlyInferr, steps=newSteps, hypothesisAssum=hypothesisAssum)
+                newStates.append(newState)
+                if operand == self.query:
+                    self.proved_Flag = True
+                    self.steps = newSteps
+                    return True
+        return False
+
+    def apply_Logical_inferequilences(self, state):
+
+        newStates = []
+        kb = state.kb
+        inferred = state.inferred
+        steps = state.steps
+        hypothesisAssum = state.hypothesisAssum
+
+        # Combine kb and inferred for comprehensive inference
+        all_Formulas = set(kb) | inferred
+
+        # Modus Ponens
+        implications = []
+        for f in all_Formulas:
+            if isinstance(f, binaryOperation) and f.operator == '>':
+                implications.append(f)
+        
+        for imp in implications:
+            LHS_suff = imp.left
+            RHS_ness = imp.right
+
+            # Handle And-Introduction when LHS_suff is a conjunction
+            if self.handle_and_introduction(LHS_suff, all_Formulas, inferred, steps, hypothesisAssum, newStates, kb):
+                continue
+ 
+            # Handle Or-Introduction when LHS_suff is a disjunction
+            if self.handle_or_introduction(LHS_suff, all_Formulas, inferred, steps, hypothesisAssum, newStates, kb):
+                continue
+                    
+            # Apply Modus Ponens if LHS_suff is in all_Formulas
+            if self.handle_modus_ponens(LHS_suff, RHS_ness, all_Formulas, inferred, steps, hypothesisAssum, newStates, kb, imp):
+                return []
+
+        # And-Elimination
+        conjunctions = []
+        for f in all_Formulas:
+            if isinstance(f, binaryOperation) and f.operator == '&':
+                conjunctions.append(f)
+        
+        for conj in conjunctions:
+            if self.handle_and_elimination(conj, all_Formulas, inferred, steps, hypothesisAssum, newStates, kb):
+                return []
+
+
+        # Or-Elimination (Branching)
+        disjunctions = []
+        for f in kb:
+            if isinstance(f, binaryOperation) and f.operator == '|':
+                disjunctions.append(f)
+         
+        for formula in disjunctions:
+            left = formula.left
+            right = formula.right
+
+            # Assume the left operand
+            new_inferred1 = inferred.copy()
+            new_inferred1.add(left)
+            newSteps1 = steps + [f"Assume {left} (from {formula})."]
+            newState1 = ProofState(kb=kb, inferred=new_inferred1, steps=newSteps1, hypothesisAssum=hypothesisAssum + [left])
+
+            # Assume the right operand
+            new_inferred2 = inferred.copy()
+            new_inferred2.add(right)
+            newSteps2 = steps + [f"Assume {right} (from {formula})."]
+            newState2 = ProofState(kb=kb, inferred=new_inferred2, steps=newSteps2, hypothesisAssum=hypothesisAssum + [right])
+
+            # Prove query from both branches
+            branch1_success, branch1_steps = self.prove_branch(newState1)
+            branch2_success, branch2_steps = self.prove_branch(newState2)
+
+            # Ensure both branches succeed
+            if branch1_success and branch2_success:
+                newSteps = steps + [f"By Or-Elimination on {formula}, since {self.query} is derived from both {left} and {right}."]
+                newSteps += branch1_steps + branch2_steps
+                combined_inferred = inferred.union([self.query])
+                newState = ProofState(kb=kb, inferred=combined_inferred, steps=newSteps, hypothesisAssum=hypothesisAssum)
+                newStates.append(newState)
+                self.proved_Flag = True
+                self.steps = newSteps
+                return []
+
+        return newStates
+        # Or-Elimination (Branching) (not needed here)
+
+        
+    def prove_branch(self, state):
+
+        queue = deque()
+        for s in [state]:
+            queue.append(s)
+
+        visited_states = []
+
+        while queue:
+            curr_State = queue.popleft()
+            self.nodesExplored += 1
+            # Check if the query is already inferred
+            if self.formula_in_set(self.query, curr_State.inferred):
+                return True, curr_State.steps
+
+            # Avoid revisiting the same state
+            if curr_State in visited_states:
+                continue
+            visited_states.append(curr_State)
+
+            # Apply inference rules
+            newStates = self.apply_Logical_inferequilences_branch(curr_State)
+            queue.extend(newStates)
+
+        return False, []
+
+    def handle_modus_ponens_branching(self, imp, all_Formulas, inferred, steps, hypothesisAssum, newStates, kb):
+        LHS_suff = imp.left
+        RHS_ness = imp.right
+        if self.formula_in_set(LHS_suff, all_Formulas):
+            if not self.formula_in_set(RHS_ness, all_Formulas):
+                freshlyInferr = inferred.copy()
+                freshlyInferr.add(RHS_ness)
+                newSteps = steps + [f"Inferred {RHS_ness} via Modus Ponens from {imp} and {LHS_suff}."]
+                newState = ProofState(kb=kb, inferred=freshlyInferr, steps=newSteps, hypothesisAssum=hypothesisAssum)
+                newStates.append(newState)
+
+    def handle_and_elimination_branching(self, conj, all_Formulas, inferred, steps, hypothesisAssum, newStates, kb):
+        left = conj.left
+        right = conj.right
+        for operand in [left, right]:
+            if not self.formula_in_set(operand, all_Formulas):
+                freshlyInferr = inferred.copy()
+                freshlyInferr.add(operand)
+                newSteps = steps + [f"Inferred {operand} via And-Elimination from {conj}."]
+                newState = ProofState(kb=kb, inferred=freshlyInferr, steps=newSteps, hypothesisAssum=hypothesisAssum)
+                newStates.append(newState)
+
+    def handle_biconditional_elimination_branching(self, bicond, all_Formulas, inferred, steps, hypothesisAssum, newStates, kb):
+        left = bicond.left
+        right = bicond.right
+        implications = [binaryOperation('>', left, right), binaryOperation('>', right, left)]
+        for imp in implications:
+            if not self.formula_in_set(imp, all_Formulas):
+                updated_KB = list(kb) + [imp]
+                newSteps = steps + [f"Inferred {imp} via Biconditional Elimination from {bicond}."]
+                newState = ProofState(kb=updated_KB, inferred=inferred, steps=newSteps, hypothesisAssum=hypothesisAssum)
+                newStates.append(newState)
+
+    def apply_Logical_inferequilences_branch(self, state):
+        newStates = []
+        kb = state.kb
+        inferred = state.inferred
+        steps = state.steps
+        hypothesisAssum = state.hypothesisAssum
+
+        # Combine kb and inferred for comprehensive inference
+        all_Formulas = set(kb) | inferred
+
+        # Modus Ponens
+        implications = []
+        for f in all_Formulas:
+            if isinstance(f, binaryOperation) and f.operator == '>':
+                implications.append(f)
+        
+        for imp in implications:
+            self.handle_modus_ponens_branching(imp, all_Formulas, inferred, steps, hypothesisAssum, newStates, kb)
+
+        # And-Elimination
+        conjunctions = []
+        for f in all_Formulas:
+            if isinstance(f, binaryOperation) and f.operator == '&':
+                conjunctions.append(f)
+
+        
+        for conj in conjunctions:
+            self.handle_and_elimination_branching(conj, all_Formulas, inferred, steps, hypothesisAssum, newStates, kb)
+
+        # Biconditional Elimination
+        biconditionals = []
+        for f in all_Formulas:
+            if isinstance(f, binaryOperation) and f.operator == '=':
+                biconditionals.append(f)
+        
+        for bicond in biconditionals:
+            self.handle_biconditional_elimination_branching(bicond, all_Formulas, inferred, steps, hypothesisAssum, newStates, kb)
+
+        return newStates
+
+
+class ProofState:
+
+    def __init__(self, kb, inferred, steps, hypothesisAssum):
+        self.kb = kb  # List of formulas
+        self.inferred = inferred  # Set of inferred propositions/formulas
+        self.steps = steps  # List of steps taken
+        self.hypothesisAssum = hypothesisAssum  # List of hypothesisAssum made (for branching)
+
+    def __eq__(self, other):
+        return self.equals(other)
+
+    def __eq__(self, other):
+        if not isinstance(other, ProofState):
+            return False
+        if set(self.kb) != set(other.kb):
+            return False
+        if self.inferred != other.inferred:
+            return False
+        if self.hypothesisAssum != other.hypothesisAssum:
+            return False
+        return True
+
+    def __hash__(self):
+        return hash((frozenset(self.kb), frozenset(self.inferred), tuple(self.hypothesisAssum)))
+
+
+# CNF Conversion Functions
+
+# this will remove > and = from the formulas
+def eliminateImplications(ast):
+    if isinstance(ast, Prop_Exp):
+        return ast
+    
+    elif isinstance(ast, unaryOperation):
+        return unaryOperation(ast.operator, eliminateImplications(ast.operand))
+    
+    elif isinstance(ast, binaryOperation):
+        term_ness = eliminateImplications(ast.left)
+        term_suff = eliminateImplications(ast.right)
+
+        if ast.operator == '>':
+            return implicationConversion(term_ness, term_suff)
+        
+        elif ast.operator == '=':
+            return EqConverter(term_ness, term_suff)
+        
+        else:
+            return binaryOperation(ast.operator, term_ness, term_suff)
+
+def implicationConversion(term_ness, term_suff):
+    return binaryOperation('|', unaryOperation('!', term_ness), term_suff)
+
+def EqConverter(left, right):
+    term_ness = implicationConversion(left, right)
+    term_suff = implicationConversion(right, left)
+    return binaryOperation('&', term_ness, term_suff)
+
+def handle_negation(op):
+
+    # here De-morgans law is applied to the operand depending on case 
+    if isinstance(op, Prop_Exp):
+        return unaryOperation('!', op)
+    
+    elif isinstance(op, unaryOperation):
+        return move_NegationInwards(op.operand)
+    
+    elif isinstance(op, binaryOperation):
+        if op.operator == '&':
+            term_ness = move_NegationInwards(unaryOperation('!', op.left))
+            term_suff = move_NegationInwards(unaryOperation('!', op.right))
+            return binaryOperation('|', term_ness, term_suff)
+        
+        elif op.operator == '|':
+            term_ness = move_NegationInwards(unaryOperation('!', op.left))
+            term_suff = move_NegationInwards(unaryOperation('!', op.right))
+            return binaryOperation('&', term_ness, term_suff)
+
+def move_NegationInwards(ast):
+    if isinstance(ast, Prop_Exp):
+        return ast
+    
+    elif isinstance(ast, unaryOperation):
+        return handle_negation(ast.operand)
+    
+    elif isinstance(ast, binaryOperation):
+        term_ness = move_NegationInwards(ast.left)
+        term_suff = move_NegationInwards(ast.right)
+        return binaryOperation(ast.operator, term_ness, term_suff)
+
+def handleAND_helper_func(ast):
+        term_ness = distribute_OR_over_AND(ast.left)
+        term_suff = distribute_OR_over_AND(ast.right)
+        return binaryOperation('&', term_ness, term_suff)
+
+def handleOR_helper_func(ast):
+        term_ness = distribute_OR_over_AND(ast.left)
+        term_suff = distribute_OR_over_AND(ast.right)
+
+        if isinstance(term_ness, binaryOperation) and term_ness.operator == '&':
+            new_left = distribute_OR_over_AND(binaryOperation('|', term_ness.left, term_suff))
+            new_right = distribute_OR_over_AND(binaryOperation('|', term_ness.right, term_suff))
+            return binaryOperation('&', new_left, new_right)
+        
+        elif isinstance(term_suff, binaryOperation) and term_suff.operator == '&':
+            new_left = distribute_OR_over_AND(binaryOperation('|', term_ness, term_suff.left))
+            new_right = distribute_OR_over_AND(binaryOperation('|', term_ness, term_suff.right))
+            return binaryOperation('&', new_left, new_right)
+        
+        else:
+            return binaryOperation('|', term_ness, term_suff)
+
+def distribute_OR_over_AND(ast):
+
+    handlers = {
+        '&': handleAND_helper_func,
+        '|': handleOR_helper_func
+    }   
+
+    if isinstance(ast, Prop_Exp) or isinstance(ast, unaryOperation):
+        return ast
+    elif isinstance(ast, binaryOperation):
+        handler = handlers.get(ast.operator)
+        if handler:
+            return handler(ast)
+    return ast
+
+def flat_the_AST(ast):
+    handlers = {
+        Prop_Exp: handle_prop_exp,
+        unaryOperation: handle_unary_operation,
+        binaryOperation: handle_binary_operation
+    }
+    handler = handlers.get(type(ast), handle_default)
+    return handler(ast)
+
+def handle_default(ast):
+    return []
+
+def handle_prop_exp(ast):
+    return [set([str(ast)])]
+
+def handle_unary_operation(ast):
+    match ast.operand:
+        case Prop_Exp():
+            return [set(['!' + str(ast.operand)])]
+        case _:
+            return []
+
+def handle_binary_operation(ast):
+    L_Clause = flat_the_AST(ast.left)
+    R_Clause = flat_the_AST(ast.right)
+    match ast.operator:
+        case '&':
+            return L_Clause + R_Clause
+        case '|':
+            list_of_clauses = []
+            for l in L_Clause:
+                for r in R_Clause:
+                    list_of_clauses.append(l.union(r))
+            return list_of_clauses
+        case _:
+            return []
+
+def conversion_to_CNFs(KnowledgeBase):
+    AST = parseFormula(KnowledgeBase)
+    AST = eliminateImplications(AST)
+    AST = move_NegationInwards(AST)
+    AST = distribute_OR_over_AND(AST)
+    clauses = flat_the_AST(AST)
+    return clauses
+
+# Resolution Functions
+def negationOperation(Symbol):
+    if Symbol.startswith('!'):
+        return Symbol[1:]
+    else:
+        return '!' + Symbol
+
+def is_tautology(expression_clause):
+    for e_i in expression_clause:
+        if negationOperation(e_i) in expression_clause:
+            return True
+    return False
+
+def resolution_inferenceRule(clause_A, clasue_B):
+
+    results = []
+
+    for e_i in clause_A:
+        for c_i in clasue_B:
+            if e_i == negationOperation(c_i):
+                resolution_input = (clause_A - {e_i}) | (clasue_B - {c_i})
+                if not is_tautology(resolution_input):
+                    results.append(resolution_input)
+    return results
+
+# 1st Heuristic function  for A* search based on no. complementary literals
+def CountOfNegativesHeusristic(A, B):
+    c = 0
+    for sym in A:
+        if negationOperation(sym) in B:
+            c += 1
+    return -c  # We want more complementary literals to be prioritized (negative)
+
+# Another heuristic function for A* search based on no. unresolved literals. this is admissible.
+def CountofUnresolvedHeuristic(A, B):
+    c = 0
+    for sym in A:
+        if negationOperation(sym) not in B:
+            c += 1
+    for sym in B:
+        if negationOperation(sym) not in A:
+            c += 1
+    return c
+
+
+
+def addClauses(senten, clauseNums, clauseMaps, KBClauses):
+    for clause in senten:
+        clauseMaps[clauseNums] = clause
+        KBClauses.append(frozenset(clause))
+        printingClauses(clauseNums, clause)  # Using helper to print clauses
+        clauseNums += 1
+    return clauseNums
+
+def resolveClauses(current_clause, other_clause, clause_Maps, KBClauses, pq_heaps, steps, derived_ClauseNum):
+    results = resolution_inferenceRule(current_clause, other_clause)
+    for resolution_input in results:
+
+        if not resolution_input:
+            steps[0] += 1
+            printNIL_result(current_clause, other_clause, clause_Maps, steps[0])  # Using helper to print NIL result
+            return steps[0], derived_ClauseNum
+        
+        if frozenset(resolution_input) not in KBClauses:
+            KBClauses.append(frozenset(resolution_input))
+            steps[0] += 1
+            printingClauses(derived_ClauseNum, resolution_input, current_clause, other_clause, clause_Maps)  # Using helper
+            clause_Maps[derived_ClauseNum] = resolution_input
+            derived_ClauseNum += 1
+            heuristic_value = CountofUnresolvedHeuristic(current_clause, other_clause)
+            heapq.heappush(pq_heaps, (heuristic_value, steps[0], frozenset(resolution_input)))
+
+    return None, derived_ClauseNum
+
+def initializationPQ(KBClauses, pq_heaps, steps):
+    for clause in KBClauses:
+        heapq.heappush(pq_heaps, (len(clause), steps[0], clause))
+
+def printingClauses(clause_num, clause, current_clause=None, other_clause=None, clause_Maps=None):
+    if current_clause and other_clause and clause_Maps:
+        print(f"C{clause_num}: {' | '.join(clause)} (Derived from C{list(clause_Maps.keys())[list(clause_Maps.values()).index(current_clause)]} and C{list(clause_Maps.keys())[list(clause_Maps.values()).index(other_clause)]})")
+    else:
+        print(f"C{clause_num}: {' | '.join(clause)}")
+
+def printNIL_result(current_clause, other_clause, clause_Maps, steps):
+    print(f"NIL (Derived from C{list(clause_Maps.keys())[list(clause_Maps.values()).index(current_clause)]} and C{list(clause_Maps.keys())[list(clause_Maps.values()).index(other_clause)]})")
+    print(f"Total steps taken: {steps}")
+
+def Resolution_theorem_prover_a_star(num_sentences, sentences, query):
+    clause_Nums = 1
+    KBClauses = []
+    clause_Maps = {}
+
+    # Adding CNF clauses from sentences
+    for sentence in sentences:
+        CNFS_clauses = conversion_to_CNFs(sentence)
+        clause_Nums = addClauses(CNFS_clauses, clause_Nums, clause_Maps, KBClauses)
+
+    # Negating the query and adding its CNF clauses
+    query_Negated = '!' + query
+    query_Clauses = conversion_to_CNFs(query_Negated)
+    clause_Nums = addClauses(query_Clauses, clause_Nums, clause_Maps, KBClauses)
+
+    # Priority queue (heap) initialization
+    pq_heaps = []
+    steps = [0]  # Steps as a reference to update
+    resol_PAIR = set()
+    derived_ClauseNum = clause_Nums
+
+    # Initialize the priority queue
+    initializationPQ(KBClauses, pq_heaps, steps)
+
+    # Main A* resolution loop
+    while pq_heaps:
+        _, g, current_clause = heapq.heappop(pq_heaps)
+
+        if not current_clause:
+            print(f"NIL found after {steps[0]} steps")
+            return steps[0]
+
+        for other_clause in KBClauses:
+            if (current_clause, other_clause) in resol_PAIR:
+                continue
+            resol_PAIR.add((current_clause, other_clause))
+
+            result, derived_ClauseNum = resolveClauses(current_clause, other_clause, clause_Maps, KBClauses, pq_heaps, steps, derived_ClauseNum)
+            if result is not None:
+                return result
+
+    print("The query cannot be proven using contradiction.")
+import time
+
+def performanceAnalysis(inputs):
+
+    results = []
+    for input_data in inputs:
+        n, m, kb_lines, query_line = input_data
+        kb = [parseFormula(line.split(':', 1)[1].strip()) for line in kb_lines]
+        query = parseFormula(query_line.split(':', 1)[1].strip())
+
+        # Natural Deduction Theorem Prover
+        prover = natural_Deduction_Theorem_Prover(kb, query)
+
+        start_time = time.time()
+        prover.prove()
+        end_time = time.time()
+
+        compute_time_nd = end_time - start_time
+        nodes_explored_nd = prover.nodesExplored
+
+        # Resolution Refutation Theorem Prover
+        sentences = [str(f) for f in kb]
+        query_str = str(query)
+
+        start_time = time.time()
+        steps_taken = Resolution_theorem_prover_a_star(n, sentences, query_str)
+        end_time = time.time()
+
+        compute_time_rr = end_time - start_time
+
+        results.append((n, m, nodes_explored_nd, compute_time_nd, steps_taken, compute_time_rr))
+
+    return results
+
+## Example knoeledge base and queries for experimental analysis.
+
+
+# inputs_for_experimental_analysis = [
+#     (4, 4, [
+#         "S1: P|(Q&(R>T))",
+#         "S2: P>R",
+#         "S3: Q>T",
+#         "S4: Q>(R=T)"
+#     ], "Query: R"),
+
+#     (5, 5, [
+#         "S1: P&Q>R",
+#         "S2: S&T>Q",
+#         "S3: P",
+#         "S4: T",
+#         "S5: S"
+#     ], "Query: R"),
+
+#     (5, 6, [
+#         "S1: A|(B&(C>D))",
+#         "S2: A>B",
+#         "S3: B>C",
+#         "S4: C>D",
+#         "S5: A>(E=F)"
+#     ], "Query: D"),
+#     (6, 7, [
+#         "S1: X|(Y&(Z>W))",
+#         "S2: Y>X",
+#         "S3: Z>W",
+#         "S4: W>(X=Z)",
+#         "S5: X>Y",
+#         "S6: Y|(Z&X)"
+#     ], "Query: X"),
+#     (6, 6, [
+#         "S1: P|(Q&(R>S))",
+#         "S2: P>S",
+#         "S3: Q>S",
+#         "S4: R>(T|U)",
+#         "S5: T>P"
+#     ], "Query: S"),
+#     (5, 4, [
+#         "S1: (A|B)>C",
+#         "S2: A>B",
+#         "S3: A",
+#         "S4: C>D",
+#         "S5: D"
+#     ], "Query: C"),
+#     (6, 5, [
+#         "S1: P&Q>R",
+#         "S2: P>Q",
+#         "S3: Q",
+#         "S4: R>S",
+#         "S5: T>R",
+#         "S6: T"
+#     ], "Query: S"),
+#     (7, 6, [
+#         "S1: P > Q",
+#         "S2: Q > R",
+#         "S3: R > S",
+#         "S4: (P & T) > U",
+#         "S5: P",
+#         "S6: T",
+#         "S7: S > U"
+#     ], "Query: U"),
+#     (8, 7, [
+#         "S1: M > N",
+#         "S2: (O & P) > Q",
+#         "S3: N > O",
+#         "S4: P > R",
+#         "S5: Q > S",
+#         "S6: M",
+#         "S7: P",
+#         "S8: R > S"
+#     ], "Query: S"),
+# ]
+
+#    # Uncomment the below code to run the experimental analysis of different inputs for performance analysis also comment the main func below this main function.
+
+# def main():
+#     results = performanceAnalysis(inputs_for_experimental_analysis)
+
+#     headers = ["n", "m", "Nodes Exp: ND", "Compute Time ND (s)", "Nodes Exp:RR", "Compute Time RR (s)"]
+#     header_line = f"{headers[0]:<3} {headers[1]:<3} {headers[2]:<20} {headers[3]:<20} {headers[4]:<20} {headers[5]:<20}"
+#     separator = "-" * len(header_line)
+
+#     print("Performance Analysis:")
+#     print(header_line)
+#     print(separator)
+
+#     for result in results:
+#         n, m, nodes_explored_nd, compute_time_nd, steps_taken_rr, compute_time_rr = result
+#         print(f"{n:<3} {m:<3} {nodes_explored_nd:<22} {compute_time_nd:<22.5f} {steps_taken_rr:<22} {compute_time_rr:<22.5f}")
+
+
+
+#  # When you uncomment the above code, comment the below main function.
+#  # below main function is for running the code in normal way.(i.e not for experimental analysis of diffrent inputs)
+
+def main():
+
+    sys.setrecursionlimit(10000)
+
+    n_m_line = sys.stdin.readline()
+
+    while n_m_line.strip() == '':
+        n_m_line = sys.stdin.readline()
+    n, m = map(int, n_m_line.strip().split())
+
+    KB = []
+    for _ in range(n):
+        F_lines = sys.stdin.readline().strip()
+        while F_lines == '':
+            F_lines = sys.stdin.readline().strip()
+        if ':' in F_lines:
+            _, F_lines = F_lines.split(':', 1)
+        f = F_lines.strip()
+        parsed_f = parseFormula(f)
+        KB.append(parsed_f)
+
+    que_LINE = sys.stdin.readline().strip()
+    while que_LINE == '':
+        que_LINE = sys.stdin.readline().strip()
+    if 'Query:' in que_LINE:
+        _, que_LINE = que_LINE.split(':', 1)
+    query = parseFormula(que_LINE.strip())
+
+    # Task 1: Natural Deduction Theorem Prover
+    prover = natural_Deduction_Theorem_Prover(KB, query)
+    prover.prove()
+
+    # Task 2: Resolution Refutation Theorem Prover
+    print("\nSwitching to Resolution Refutation  provers using A*...")
+    sentences = [str(f) for f in KB]
+    query_str = str(query)
+    Resolution_theorem_prover_a_star(n, sentences, query_str)
+
+
+if __name__ == "__main__":
+    main()
